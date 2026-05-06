@@ -267,8 +267,12 @@ function Chat() {
     socket.emit("join", username);
 
     socket.on("receiveMessage", (data) => {
-      const enriched = { ...data, id: data.id || `${Date.now()}_${Math.random()}`, isoTime: new Date().toISOString(), reactions: [] };
-      setMessages(prev => [...prev, enriched]);
+      const enriched = { ...data, id: data.id || `${Date.now()}_${Math.random()}`, isoTime: data.isoTime || new Date().toISOString(), reactions: data.reactions || [] };
+      setMessages(prev => {
+        // Deduplicate: skip if message with same id already exists
+        if (enriched.id && prev.some(m => m.id === enriched.id)) return prev;
+        return [...prev, enriched];
+      });
       if (data.user !== username) {
         setUnread(prev => ({
           ...prev,
@@ -315,7 +319,7 @@ function Chat() {
       replyTo: replyTo ? { user: replyTo.user, text: replyTo.text } : null,
     };
     socket.emit("sendMessage", data);
-    setMessages(prev => [...prev, data]);
+    // Do NOT push locally — the server echoes it back via receiveMessage
     setMessage("");
     setReplyTo(null);
     inputRef.current?.focus();
