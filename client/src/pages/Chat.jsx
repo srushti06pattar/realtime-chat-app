@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:5000");
+const socket = io("https://realtime-chat-app-7dti.onrender.com/");
 
 function Chat() {
   const navigate = useNavigate();
