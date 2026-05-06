@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 
-const socket = io("https://realtime-chat-app-7dti.onrender.com/");
+let socket;
 
 function Chat() {
   const navigate = useNavigate();
@@ -49,6 +49,7 @@ function Chat() {
 
   // Socket Events
   useEffect(() => {
+    socket = io("https://realtime-chat-app-7dti.onrender.com/");
     socket.emit("join", username);
 
     socket.on("receiveMessage", (data) => {
