@@ -21,7 +21,7 @@ let users = [];
 io.on("connection", (socket) => {
   console.log("User Connected");
 
-  // Join Chat
+  
   socket.on("join", (username) => {
     users.push({
       id: socket.id,
@@ -34,17 +34,17 @@ io.on("connection", (socket) => {
     );
   });
 
-  // Typing Indicator
+  
   socket.on("typing", (username) => {
     socket.broadcast.emit("typing", username);
   });
 
-  // Send Message
+  
   socket.on("sendMessage", (data) => {
     io.emit("receiveMessage", data);
   });
 
-  // Disconnect
+  // Logout
   socket.on("disconnect", () => {
     users = users.filter(
       (user) => user.id !== socket.id

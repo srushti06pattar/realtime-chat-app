@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import io from "socket.io-client";
 
 let socket;
 
-// ── Helpers ──────────────────────────────────────────────
 const AVATAR_COLORS = [
   "#6366f1","#8b5cf6","#ec4899","#f59e0b",
   "#10b981","#3b82f6","#ef4444","#14b8a6",
@@ -26,6 +25,12 @@ const relativeTime = (iso) => {
   return new Date(iso).toLocaleDateString();
 };
 
+const formatBytes = (bytes) => {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+};
+
 const ROOMS = [
   { name: "General", icon: "🌐", desc: "General chat" },
   { name: "Coding",  icon: "💻", desc: "Dev talk" },
@@ -35,7 +40,22 @@ const ROOMS = [
 
 const REACTION_EMOJIS = ["❤️","😂","🔥","👍","😮","😢"];
 
-// ── Avatar ────────────────────────────────────────────────
+// ── File type helpers ──────────────────────────────────────
+const isImage = (type = "") => type.startsWith("image/");
+const isVideo = (type = "") => type.startsWith("video/");
+const isPDF   = (type = "") => type === "application/pdf";
+const getFileIcon = (type = "") => {
+  if (isImage(type)) return "🖼️";
+  if (isVideo(type)) return "🎬";
+  if (isPDF(type))   return "📄";
+  if (type.includes("zip") || type.includes("rar")) return "🗜️";
+  if (type.includes("audio")) return "🎵";
+  if (type.includes("text") || type.includes("doc")) return "📝";
+  if (type.includes("sheet") || type.includes("excel")) return "📊";
+  return "📎";
+};
+
+// ── Avatar ─────────────────────────────────────────────────
 function Avatar({ name, size = 36, showRing = false }) {
   const color = getColor(name);
   return (
@@ -53,8 +73,330 @@ function Avatar({ name, size = 36, showRing = false }) {
   );
 }
 
+// ── Image Preview Modal ────────────────────────────────────
+function ImageModal({ src, name, onClose }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.88)",
+        backdropFilter: "blur(8px)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        animation: "fadeIn .2s ease",
+      }}
+    >
+      <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 10 }}>
+        <a
+          href={src}
+          download={name}
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: "rgba(99,102,241,0.8)",
+            border: "none", borderRadius: 10,
+            padding: "8px 16px", color: "#fff",
+            fontSize: 13, fontWeight: 600,
+            textDecoration: "none", cursor: "pointer",
+          }}
+        >⬇ Download</a>
+        <button
+          onClick={onClose}
+          style={{
+            background: "rgba(255,255,255,0.1)",
+            border: "none", borderRadius: 10,
+            padding: "8px 14px", color: "#fff",
+            fontSize: 16, cursor: "pointer",
+          }}
+        >✕</button>
+      </div>
+      <img
+        src={src}
+        alt={name}
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "90vw", maxHeight: "85vh",
+          borderRadius: 16,
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+          objectFit: "contain",
+        }}
+      />
+      <div style={{ marginTop: 12, color: "rgba(255,255,255,0.5)", fontSize: 13 }}>{name}</div>
+    </div>
+  );
+}
+
+// ── Video Preview Modal ────────────────────────────────────
+function VideoModal({ src, name, onClose }) {
+  useEffect(() => {
+    const handler = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000,
+        background: "rgba(0,0,0,0.92)",
+        backdropFilter: "blur(12px)",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        animation: "fadeIn .2s ease",
+      }}
+    >
+      <div style={{ position: "absolute", top: 20, right: 20, display: "flex", gap: 10 }}>
+        <a
+          href={src}
+          download={name}
+          onClick={e => e.stopPropagation()}
+          style={{
+            background: "rgba(99,102,241,0.8)",
+            border: "none", borderRadius: 10,
+            padding: "8px 16px", color: "#fff",
+            fontSize: 13, fontWeight: 600,
+            textDecoration: "none", cursor: "pointer",
+          }}
+        >⬇ Download</a>
+        <button
+          onClick={onClose}
+          style={{
+            background: "rgba(255,255,255,0.1)",
+            border: "none", borderRadius: 10,
+            padding: "8px 14px", color: "#fff",
+            fontSize: 16, cursor: "pointer",
+          }}
+        >✕</button>
+      </div>
+      <video
+        src={src}
+        controls
+        autoPlay
+        onClick={e => e.stopPropagation()}
+        style={{
+          maxWidth: "90vw", maxHeight: "80vh",
+          borderRadius: 16,
+          boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+          background: "#000",
+        }}
+      />
+      <div style={{ marginTop: 12, color: "rgba(255,255,255,0.5)", fontSize: 13 }}>{name}</div>
+    </div>
+  );
+}
+
+// ── File Attachment Renderer ───────────────────────────────
+function FileAttachment({ file, isMe, onPreview }) {
+  if (!file) return null;
+  const { name, type, size, url } = file;
+
+  // Image preview (inline thumbnail)
+  if (isImage(type)) {
+    return (
+      <div style={{ marginTop: 4 }}>
+        <img
+          src={url}
+          alt={name}
+          onClick={() => onPreview("image", url, name)}
+          style={{
+            maxWidth: 280,
+            maxHeight: 200,
+            borderRadius: 12,
+            objectFit: "cover",
+            cursor: "pointer",
+            display: "block",
+            transition: "opacity .15s, transform .15s",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.opacity = "0.88"; e.currentTarget.style.transform = "scale(1.01)"; }}
+          onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "scale(1)"; }}
+        />
+        <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{name}</span>
+          <a
+            href={url}
+            download={name}
+            style={{
+              fontSize: 11, color: "#818cf8",
+              textDecoration: "none", fontWeight: 600,
+              padding: "2px 8px",
+              background: "rgba(99,102,241,0.15)",
+              borderRadius: 6,
+            }}
+          >⬇ Save</a>
+        </div>
+      </div>
+    );
+  }
+
+  // Video preview (inline player)
+  if (isVideo(type)) {
+    return (
+      <div style={{ marginTop: 4 }}>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <video
+            src={url}
+            style={{
+              maxWidth: 280,
+              maxHeight: 180,
+              borderRadius: 12,
+              display: "block",
+              background: "#000",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+            muted
+            playsInline
+          />
+          <button
+            onClick={() => onPreview("video", url, name)}
+            style={{
+              position: "absolute", inset: 0,
+              background: "rgba(0,0,0,0.4)",
+              border: "none", borderRadius: 12,
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontSize: 36,
+              transition: "background .2s",
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.6)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.4)"}
+          >▶</button>
+        </div>
+        <div style={{ marginTop: 6, display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>{name}</span>
+          <a
+            href={url}
+            download={name}
+            style={{
+              fontSize: 11, color: "#818cf8",
+              textDecoration: "none", fontWeight: 600,
+              padding: "2px 8px",
+              background: "rgba(99,102,241,0.15)",
+              borderRadius: 6,
+            }}
+          >⬇ Save</a>
+        </div>
+      </div>
+    );
+  }
+
+  // PDF preview card
+  if (isPDF(type)) {
+    // Convert base64 data URL → Blob URL so browser can open it in a new tab
+    const openPDF = () => {
+      try {
+        const base64 = url.split(",")[1];
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, "_blank");
+        // Revoke after a short delay to free memory
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+      } catch (e) {
+        alert("Could not open PDF. Try downloading it instead.");
+      }
+    };
+
+    const downloadPDF = () => {
+      try {
+        const base64 = url.split(",")[1];
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const blob = new Blob([bytes], { type: "application/pdf" });
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+      } catch (e) {
+        alert("Could not download PDF.");
+      }
+    };
+
+    return (
+      <div style={{
+        marginTop: 4,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        borderRadius: 12,
+        overflow: "hidden",
+        maxWidth: 280,
+      }}>
+        <div style={{
+          background: "rgba(239,68,68,0.12)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          padding: "10px 14px",
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <span style={{ fontSize: 28 }}>📄</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: "#f1f5f9",
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>{name}</div>
+            <div style={{ fontSize: 11, color: "#6b7280" }}>PDF · {formatBytes(size)}</div>
+          </div>
+        </div>
+        <div style={{ padding: "8px 14px", display: "flex", gap: 8 }}>
+          <button onClick={openPDF} style={fileActionBtn("#6366f1")}>👁 View</button>
+          <button onClick={downloadPDF} style={fileActionBtn("rgba(255,255,255,0.08)")}>⬇ Download</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Generic file download card
+  return (
+    <div style={{
+      marginTop: 4,
+      background: "rgba(255,255,255,0.04)",
+      border: "1px solid rgba(255,255,255,0.08)",
+      borderRadius: 12,
+      padding: "10px 14px",
+      display: "flex", alignItems: "center", gap: 12,
+      maxWidth: 280,
+    }}>
+      <span style={{ fontSize: 30, flexShrink: 0 }}>{getFileIcon(type)}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 600, color: "#f1f5f9",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>{name}</div>
+        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>{formatBytes(size)}</div>
+        <a
+          href={url}
+          download={name}
+          style={fileActionBtn("#6366f1")}
+        >⬇ Download</a>
+      </div>
+    </div>
+  );
+}
+
+const fileActionBtn = (bg) => ({
+  fontSize: 11, fontWeight: 600,
+  padding: "4px 10px", borderRadius: 6,
+  background: bg, color: "#fff",
+  textDecoration: "none", cursor: "pointer",
+  display: "inline-block",
+  border: "none",
+  fontFamily: "'Sora', sans-serif",
+  transition: "opacity .15s",
+});
+
 // ── Message Bubble ─────────────────────────────────────────
-function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
+function MessageBubble({ msg, isMe, onReact, onReply, onPreview }) {
   const [showActions, setShowActions] = useState(false);
   const [showReactPicker, setShowReactPicker] = useState(false);
 
@@ -62,6 +404,9 @@ function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
   (msg.reactions || []).forEach(r => {
     reactionCounts[r.emoji] = (reactionCounts[r.emoji] || 0) + 1;
   });
+
+  const hasFile = !!msg.file;
+  const hasText = !!msg.text;
 
   return (
     <div
@@ -80,12 +425,11 @@ function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
 
       <div style={{ maxWidth: "62%", display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", gap: 3 }}>
         {!isMe && (
-          <span style={{ fontSize: 12, color: "#6b7280", paddingLeft: 4, fontWeight: 600, color: getColor(msg.user) }}>
+          <span style={{ fontSize: 12, paddingLeft: 4, fontWeight: 600, color: getColor(msg.user) }}>
             {msg.user}
           </span>
         )}
 
-        {/* Reply preview */}
         {msg.replyTo && (
           <div style={{
             background: "rgba(255,255,255,0.04)",
@@ -108,10 +452,8 @@ function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
             : "rgba(255,255,255,0.055)",
           backdropFilter: "blur(10px)",
           border: isMe ? "none" : "1px solid rgba(255,255,255,0.07)",
-          borderRadius: isMe
-            ? (msg.replyTo ? "16px 4px 16px 16px" : "16px 4px 16px 16px")
-            : (msg.replyTo ? "4px 16px 16px 16px" : "4px 16px 16px 16px"),
-          padding: "10px 14px",
+          borderRadius: isMe ? "16px 4px 16px 16px" : "4px 16px 16px 16px",
+          padding: hasFile && !hasText ? "10px 10px 6px" : "10px 14px",
           color: "#f1f5f9",
           fontSize: 15,
           lineHeight: 1.55,
@@ -119,7 +461,12 @@ function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
           boxShadow: isMe ? "0 4px 20px rgba(99,102,241,0.3)" : "0 2px 12px rgba(0,0,0,0.2)",
           position: "relative",
         }}>
-          {msg.text}
+          {hasText && <div style={{ marginBottom: hasFile ? 8 : 0 }}>{msg.text}</div>}
+
+          {hasFile && (
+            <FileAttachment file={msg.file} isMe={isMe} onPreview={onPreview} />
+          )}
+
           <span style={{
             display: "block",
             fontSize: 10,
@@ -168,7 +515,6 @@ function MessageBubble({ msg, isMe, onReact, onReply, replyMsg }) {
           bottom: 24,
           zIndex: 10,
         }}>
-          {/* React picker */}
           {showReactPicker && (
             <div style={{
               position: "absolute",
@@ -228,7 +574,7 @@ function ActionBtn({ children, onClick, title }) {
   );
 }
 
-// ── Main Chat Component ────────────────────────────────────
+// ── Main Chat Component ──────────────────────────────────────
 function Chat() {
   const navigate = useNavigate();
   const username = localStorage.getItem("username");
@@ -243,9 +589,12 @@ function Chat() {
   const [replyTo, setReplyTo] = useState(null);
   const [unread, setUnread] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [preview, setPreview] = useState(null); // { type: "image"|"video", url, name }
+  const [uploadProgress, setUploadProgress] = useState(null); // null or { name, progress }
 
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { if (!username) navigate("/"); }, []);
 
@@ -267,25 +616,25 @@ function Chat() {
     socket.emit("join", username);
 
     socket.on("receiveMessage", (data) => {
-      const enriched = { ...data, id: data.id || `${Date.now()}_${Math.random()}`, isoTime: data.isoTime || new Date().toISOString(), reactions: data.reactions || [] };
+      const enriched = {
+        ...data,
+        id: data.id || `${Date.now()}_${Math.random()}`,
+        isoTime: data.isoTime || new Date().toISOString(),
+        reactions: data.reactions || [],
+      };
       setMessages(prev => {
-        // Deduplicate: skip if message with same id already exists
         if (enriched.id && prev.some(m => m.id === enriched.id)) return prev;
         return [...prev, enriched];
       });
       if (data.user !== username) {
-        setUnread(prev => ({
-          ...prev,
-          [data.room]: (prev[data.room] || 0) + 1,
-        }));
+        setUnread(prev => ({ ...prev, [data.room]: (prev[data.room] || 0) + 1 }));
         if (Notification.permission === "granted") {
-          new Notification(`${data.user} in #${data.room}`, { body: data.text });
+          new Notification(`${data.user} in #${data.room}`, { body: data.text || `Shared a file: ${data.file?.name}` });
         }
       }
     });
 
     socket.on("activeUsers", setUsers);
-
     socket.on("typing", (user) => {
       if (user !== username) {
         setTypingUser(user);
@@ -319,10 +668,65 @@ function Chat() {
       replyTo: replyTo ? { user: replyTo.user, text: replyTo.text } : null,
     };
     socket.emit("sendMessage", data);
-    // Do NOT push locally — the server echoes it back via receiveMessage
     setMessage("");
     setReplyTo(null);
     inputRef.current?.focus();
+  };
+
+  // ── File Upload Handler ──────────────────────────────────
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // 50MB limit
+    if (file.size > 50 * 1024 * 1024) {
+      alert("File too large. Maximum size is 50MB.");
+      return;
+    }
+
+    setUploadProgress({ name: file.name, progress: 0 });
+
+    const reader = new FileReader();
+
+    reader.onprogress = (event) => {
+      if (event.lengthComputable) {
+        setUploadProgress({ name: file.name, progress: Math.round((event.loaded / event.total) * 100) });
+      }
+    };
+
+    reader.onload = () => {
+      const data = {
+        id: `${Date.now()}_${Math.random()}`,
+        user: username,
+        room,
+        text: message.trim() || null,
+        file: {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          url: reader.result,
+        },
+        time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isoTime: new Date().toISOString(),
+        reactions: [],
+        replyTo: replyTo ? { user: replyTo.user, text: replyTo.text } : null,
+      };
+      socket.emit("sendMessage", data);
+      setMessage("");
+      setReplyTo(null);
+      setUploadProgress(null);
+      inputRef.current?.focus();
+    };
+
+    reader.onerror = () => {
+      alert("Error reading file.");
+      setUploadProgress(null);
+    };
+
+    reader.readAsDataURL(file);
+
+    // Reset so same file can be re-uploaded
+    e.target.value = "";
   };
 
   const handleTyping = (e) => {
@@ -344,12 +748,21 @@ function Chat() {
     }));
   };
 
+  const handlePreview = (type, url, name) => {
+    setPreview({ type, url, name });
+  };
+
   const logout = () => { localStorage.removeItem("username"); navigate("/"); };
   const clearChat = () => { localStorage.removeItem("messages_v2"); setMessages([]); };
 
   const filteredMessages = messages.filter(m => {
     if (m.room !== room) return false;
-    if (searchQuery) return m.text.toLowerCase().includes(searchQuery.toLowerCase()) || m.user.toLowerCase().includes(searchQuery.toLowerCase());
+    if (searchQuery) {
+      const textMatch = m.text?.toLowerCase().includes(searchQuery.toLowerCase());
+      const userMatch = m.user?.toLowerCase().includes(searchQuery.toLowerCase());
+      const fileMatch = m.file?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      return textMatch || userMatch || fileMatch;
+    }
     return true;
   });
 
@@ -371,12 +784,22 @@ function Chat() {
         @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
         @keyframes slideLeft { from { opacity:0; transform:translateX(-16px) } to { opacity:1; transform:translateX(0) } }
         @keyframes blink { 0%,100%{opacity:0.3} 50%{opacity:1} }
+        @keyframes progressPulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
         .typing-dot { animation: blink 1.2s infinite; }
         .typing-dot:nth-child(2) { animation-delay: .2s }
         .typing-dot:nth-child(3) { animation-delay: .4s }
         input, button, textarea { font-family: 'Sora', sans-serif; }
         input::placeholder { color: #4b5563; }
+        a { color: inherit; }
       `}</style>
+
+      {/* Preview Modals */}
+      {preview?.type === "image" && (
+        <ImageModal src={preview.url} name={preview.name} onClose={() => setPreview(null)} />
+      )}
+      {preview?.type === "video" && (
+        <VideoModal src={preview.url} name={preview.name} onClose={() => setPreview(null)} />
+      )}
 
       <div style={{ height: "100vh", background: "#0d0f18", display: "flex", overflow: "hidden", color: "#f1f5f9" }}>
 
@@ -475,7 +898,7 @@ function Chat() {
             ))}
           </div>
 
-          {/* Current user footer */}
+          {/* Footer */}
           <div style={{ padding: "12px 10px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "rgba(255,255,255,0.04)", borderRadius: 12, marginBottom: 10 }}>
               <Avatar name={username} size={34} showRing />
@@ -518,7 +941,7 @@ function Chat() {
               {showSearch && (
                 <input
                   autoFocus
-                  placeholder="Search messages..."
+                  placeholder="Search messages & files..."
                   value={searchQuery}
                   onChange={e => setSearchQuery(e.target.value)}
                   style={{
@@ -540,7 +963,6 @@ function Chat() {
 
           {/* Messages */}
           <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
-
             {filteredMessages.length === 0 && !searchQuery && (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "#374151", animation: "fadeIn .4s ease" }}>
                 <div style={{ fontSize: 52 }}>{ROOMS.find(r => r.name === room)?.icon}</div>
@@ -562,6 +984,7 @@ function Chat() {
                 isMe={msg.user === username}
                 onReact={handleReact}
                 onReply={setReplyTo}
+                onPreview={handlePreview}
               />
             ))}
 
@@ -585,6 +1008,33 @@ function Chat() {
 
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Upload Progress Bar */}
+          {uploadProgress && (
+            <div style={{
+              margin: "0 20px",
+              background: "rgba(99,102,241,0.08)",
+              border: "1px solid rgba(99,102,241,0.2)",
+              borderRadius: 10,
+              padding: "8px 14px",
+              animation: "fadeIn .2s ease",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                <span style={{ fontSize: 12, color: "#9ca3af" }}>📎 {uploadProgress.name}</span>
+                <span style={{ fontSize: 12, color: "#6366f1", fontWeight: 600 }}>{uploadProgress.progress}%</span>
+              </div>
+              <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: `${uploadProgress.progress}%`,
+                  background: "linear-gradient(90deg, #6366f1, #818cf8)",
+                  borderRadius: 4,
+                  transition: "width .2s ease",
+                  animation: "progressPulse 1.5s infinite",
+                }} />
+              </div>
+            </div>
+          )}
 
           {/* Emoji bar */}
           <div style={{ padding: "8px 20px 0", display: "flex", gap: 4, background: "rgba(255,255,255,0.01)" }}>
@@ -619,8 +1069,40 @@ function Chat() {
             </div>
           )}
 
-          {/* Input */}
+          {/* Input area */}
           <div style={{ padding: "12px 20px 20px", display: "flex", gap: 10, alignItems: "center" }}>
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.mp3,.mp4,.mov,.avi"
+              onChange={handleFileUpload}
+              style={{ display: "none" }}
+            />
+
+            {/* Attach button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach file (image, video, PDF, etc.)"
+              disabled={!!uploadProgress}
+              style={{
+                width: 46, height: 46, flexShrink: 0,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.09)",
+                borderRadius: 14,
+                cursor: uploadProgress ? "not-allowed" : "pointer",
+                color: "#9ca3af",
+                fontSize: 18,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all .15s",
+                opacity: uploadProgress ? 0.5 : 1,
+              }}
+              onMouseEnter={e => { if (!uploadProgress) { e.currentTarget.style.background = "rgba(99,102,241,0.15)"; e.currentTarget.style.color = "#818cf8"; e.currentTarget.style.borderColor = "rgba(99,102,241,0.3)"; }}}
+              onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#9ca3af"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.09)"; }}
+            >
+              📎
+            </button>
+
             <div style={{ flex: 1, position: "relative" }}>
               <input
                 ref={inputRef}
@@ -644,6 +1126,7 @@ function Chat() {
                 onBlur={e => { e.target.style.borderColor = "rgba(255,255,255,0.09)"; e.target.style.boxShadow = "none"; }}
               />
             </div>
+
             <button
               onClick={sendMessage}
               disabled={!message.trim()}
